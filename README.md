@@ -19,6 +19,296 @@ The challenge focused on diagnosing issues with student searching, updating, ret
 
 ---
 
+# Part A — My Answers
+
+## Question 1
+
+If two Adas exist in the database, `Student.find({ name })` will fetch both Adas in an array.
+
+While `findOne()` would return one document instead of an array.
+
+`find()` is used when you expect multiple possible matches, such as searching students by name.
+
+`findOne()` is used when you only need one matching document.
+
+---
+
+## Question 2
+
+The current code does a plain equality match:
+
+```js
+const { name } = req.query;
+const student = await Student.find({ name });
+```
+
+MongoDB compares strings exactly as given — it does not ignore case and does not trim whitespace.
+
+For example:
+
+```text
+/get-student-by-name?name=Ada
+```
+
+matches a document with:
+
+```json
+{
+  "name": "Ada"
+}
+```
+
+But:
+
+```text
+/get-student-by-name?name=ada
+```
+
+will not match `"Ada"` because:
+
+```text
+"ada" !== "Ada"
+```
+
+Similarly:
+
+```text
+/get-student-by-name?name=Ada%20
+```
+
+will not match `"Ada"` because `"Ada "` is different from `"Ada"`.
+
+In each failing case, the query does not throw an error. It simply returns an empty result, which can make it look like the student does not exist.
+
+The fix is to perform the matching inside MongoDB using a case-insensitive regular expression rather than fetching all students and filtering them in JavaScript:
+
+```js
+const { name } = req.query;
+
+const student = await Student.find({
+  name: { $regex: name.trim(), $options: "i" }
+});
+```
+
+`$options: "i"` makes the match case-insensitive, so `ada`, `Ada`, and `ADA` are treated the same.
+
+`.trim()` removes leading and trailing whitespace from the input before the query runs, so `"Ada "` can still match `"Ada"`.
+
+This keeps the comparison work inside the database query instead of pulling every student into Node.js and filtering with `.filter()`, which does not scale well as the collection grows.
+
+---
+
+## Question 3
+
+### Reason One: How the Endpoint Is Being Called
+
+The route is defined as:
+
+```js
+app.put("/update-student/:id", async (req, res) => {
+  const { id } = req.params;
+```
+
+This means the ID must be part of the URL path, not the request body.
+
+For example:
+
+```http
+PUT http://localhost:4555/update-student/6a9718a135d8ee2f4a33ba87
+```
+
+If the admin instead sends the ID inside the JSON body while leaving it out of the URL, or uses the wrong ID in the URL, `req.params.id` will not match the student she actually intends to update.
+
+`findByIdAndUpdate()` could then:
+
+* Update the wrong document
+* Find no document
+* Throw a cast error
+
+Any of these situations could make the response appear as though "nothing changed," giving the impression that the old document is still there.
+
+The HTTP method also matters. If the request is accidentally sent as a `GET` or `POST` instead of `PUT`, it will not hit this route handler at all. The admin could then be looking at a read response instead of the result of an update.
+
+### Reason Two: Mongoose Update Options
+
+The route already includes:
+
+```js
+{ new: true }
+```
+
+`new: true` tells Mongoose to return the document **after** the update has been applied instead of the default behavior of returning the document as it was before the update.
+
+Therefore, if `new: true` were missing or removed, the response sent back to the admin could show the old, pre-update version even though the update itself succeeded in the database.
+
+Separately, `runValidators` is not currently set. Without:
+
+```js
+runValidators: true
+```
+
+Mongoose skips schema validation during update operations.
+
+There is also a risk from how the update object is built:
+
+```js
+const { name, age, email, phone, address, course, institution } = req.body;
+```
+
+If the admin's request does not include every one of these fields, the missing fields become `undefined` after destructuring.
+
+Passing an object containing undefined values into `findByIdAndUpdate()` can unintentionally affect existing fields instead of simply updating the field the admin intended to change.
+
+For example, if the admin only wants to change the phone number, a partial update is better handled with `PATCH`, where only the fields actually provided are updated.
+
+---
+
+## Question 4
+
+The current code is:
+
+```js
+const student = await Student.findById(id);
+
+return res.status(200).json({
+  message: "Student fetched successfully",
+  student
+});
+```
+
+### Valid ObjectId and Student Exists
+
+`findById()` locates the matching document, and the route sends `200 OK` with the student data in the response body.
+
+This case works correctly as-is.
+
+### Valid ObjectId but Student Does Not Exist
+
+When the ID is a properly formatted ObjectId but no document matches it, Mongoose's `findById()` does not throw an error. It simply resolves to `null`.
+
+The current code does not check for that `null` value, so it still falls through to the success response:
+
+```json
+{
+  "message": "Student fetched successfully",
+  "student": null
+}
+```
+
+This is sent with a `200 OK` status.
+
+That is misleading because the request succeeded from the server's point of view, but the caller did not actually receive a student.
+
+The fix is to explicitly check:
+
+```js
+if (!student)
+```
+
+and return:
+
+```text
+404 Not Found
+```
+
+A `404` correctly communicates that no student exists with that ID.
+
+### Invalid ID, Such as `abc123`
+
+This is a fundamentally different failure.
+
+A valid MongoDB ObjectId has a specific format: a 24-character hexadecimal string.
+
+When `"abc123"` is passed to `findById()`, Mongoose attempts to cast that string into an ObjectId before querying the database. The cast fails and Mongoose throws a `CastError`.
+
+That error is caught by the existing catch block:
+
+```js
+} catch (error) {
+  return res.status(500).json({
+    message: "Internal server error"
+  });
+}
+```
+
+This results in:
+
+```text
+500 Internal Server Error
+```
+
+That is the wrong status code for this situation.
+
+A `500` implies something went wrong unexpectedly on the server. However, in this case, the problem is that the client supplied an invalid ID.
+
+This is a client-side input error and belongs in the `4xx` range.
+
+### Why a CastError and a Missing Document Are Not the Same Bug
+
+```text
+CastError
+Invalid ID format, e.g. abc123
+→ The request itself is malformed
+→ Should return 400 Bad Request
+
+Valid ObjectId but no matching document
+→ The request was valid and the query ran successfully
+→ Nothing was found
+→ Should return 404 Not Found
+```
+
+To handle both correctly, the application should validate the ObjectId before calling `findById()` and return `400 Bad Request` for an invalid ID.
+
+The application should then separately check whether the returned student is `null` and return `404 Not Found` when the ID is valid but no student exists.
+
+---
+
+## Question 5
+
+The actual collection name in MongoDB is `students`, not `Student`.
+
+By default, Mongoose takes the model name, lowercases it, and pluralizes it.
+
+For example:
+
+```js
+const Student = mongoose.model("Student", studentSchema);
+```
+
+creates a model called `Student`, but Mongoose uses the collection:
+
+```text
+students
+```
+
+This matters if someone bypasses the API and queries MongoDB directly. They need to use the real collection name, `students`, rather than the model name from the code.
+
+MongoDB will not necessarily give an error if someone queries a collection called `Student`. It can simply query a collection that does not contain the expected documents and return an empty result.
+
+---
+
+## Question 6
+
+This line in `app.js` is responsible for making JSON request bodies available through `req.body`:
+
+```js
+app.use(express.json());
+```
+
+`express.json()` parses incoming JSON request bodies.
+
+However, the client must send the correct `Content-Type` header:
+
+```text
+Content-Type: application/json
+```
+
+Without the correct content type, Express may not parse the request body as JSON, and `req.body` may not contain the expected data.
+
+As a result, fields destructured from `req.body` can become `undefined`, which can cause validation errors or result in fields not being saved as expected.
+
+---
+
 # Part C — Proof of Testing
 
 All required API tests were performed using **EchoAPI** after updating `app.js`.
@@ -35,7 +325,7 @@ The screenshots below show the request and response for each required test.
 GET /search-students?q=ada
 ```
 
-### What was tested
+### What Was Tested
 
 The search endpoint was tested using `q=ada`.
 
@@ -70,7 +360,7 @@ The test passed. The API returned both students in the response.
 GET /search-students
 ```
 
-### What was tested
+### What Was Tested
 
 The `q` query parameter was intentionally omitted.
 
@@ -99,11 +389,11 @@ The test passed. The API correctly returned **400 Bad Request**.
 GET /get-student/abc123
 ```
 
-### What was tested
+### What Was Tested
 
 An invalid MongoDB ObjectId was supplied.
 
-The previous implementation allowed the Mongoose CastError to reach the generic error handler, resulting in a 500 response.
+The previous implementation allowed the Mongoose `CastError` to reach the generic error handler, resulting in a `500` response.
 
 The updated implementation checks whether the ID is valid before calling `findById()`.
 
@@ -130,7 +420,7 @@ The test passed. The API correctly identified `abc123` as an invalid student ID 
 GET /get-student/507f1f77bcf86cd799439011
 ```
 
-### What was tested
+### What Was Tested
 
 A valid-looking MongoDB ObjectId was supplied, but no student with that ID exists in the database.
 
@@ -165,7 +455,7 @@ PATCH /students/:id/course
 }
 ```
 
-### What was tested
+### What Was Tested
 
 A real student's course was updated using the PATCH endpoint.
 
@@ -211,7 +501,7 @@ PATCH /students/:id/course
 }
 ```
 
-### What was tested
+### What Was Tested
 
 A one-character course was submitted.
 
@@ -223,7 +513,7 @@ The PATCH operation also uses:
 runValidators: true
 ```
 
-so that the schema validation is applied during the update.
+so that schema validation is applied during the update.
 
 ### Expected Result
 
@@ -273,7 +563,7 @@ POST /create-student
 }
 ```
 
-### What was tested
+### What Was Tested
 
 The email field was configured as unique in the Mongoose schema.
 
@@ -306,7 +596,7 @@ DELETE /delete-student/:id
 
 A valid MongoDB ObjectId belonging to no student in the database was supplied.
 
-### What was tested
+### What Was Tested
 
 The API should distinguish between:
 
@@ -344,7 +634,7 @@ The test passed. The API correctly returned **404 Not Found** instead of reporti
 
 # Conclusion
 
-The API was tested against all eight required scenarios from the "Ghost Student" challenge.
+The API was tested against all eight required scenarios from the **"Ghost Student"** challenge.
 
 The updated implementation correctly handles:
 
