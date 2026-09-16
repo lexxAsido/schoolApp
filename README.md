@@ -1,3 +1,4 @@
+
 # Student Challenge: The "Ghost Student" Incident
 
 A Node.js, Express, and MongoDB REST API for managing students.
@@ -10,12 +11,71 @@ The challenge focused on diagnosing issues with student searching, updating, ret
 
 ## Technologies Used
 
-* Node.js
-* Express.js
-* MongoDB
-* Mongoose
-* EchoAPI
-* REST API
+- Node.js
+- Express.js
+- MongoDB
+- Mongoose
+- EchoAPI
+- Postman
+- REST API
+
+---
+
+## Deployed API & Endpoint Testing
+
+**Base URL:**
+
+```text
+https://schoolapp-tf2p.onrender.com/students
+```
+
+### Available Endpoints
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| POST | `/create-student` | Create a new student |
+| GET | `/get-students` | Get all students |
+| GET | `/get-student/:id` | Get a student by ID |
+| PUT | `/update-student/:id` | Update a student by ID |
+| GET | `/get-student-by-name` | Get students by name |
+| GET | `/search-students` | Search students |
+| PATCH | `/:id/course` | Update a student's course |
+| DELETE | `/delete-student/:id` | Delete a student by ID |
+
+### Full Testing URLs
+
+```text
+POST   https://schoolapp-tf2p.onrender.com/students/create-student
+GET    https://schoolapp-tf2p.onrender.com/students/get-students
+GET    https://schoolapp-tf2p.onrender.com/students/get-student/:id
+PUT    https://schoolapp-tf2p.onrender.com/students/update-student/:id
+GET    https://schoolapp-tf2p.onrender.com/students/get-student-by-name
+GET    https://schoolapp-tf2p.onrender.com/students/search-students
+PATCH  https://schoolapp-tf2p.onrender.com/students/:id/course
+DELETE https://schoolapp-tf2p.onrender.com/students/delete-student/:id
+```
+
+### Example JSON Body — Create Student
+
+Use the following JSON body when testing the `POST /create-student` endpoint:
+
+```json
+{
+  "name": "John Doe",
+  "age": 22,
+  "email": "johndoe@example.com",
+  "phone": "08012345678",
+  "address": "Abuja",
+  "course": "Computer Science",
+  "institution": "University of Abuja"
+}
+```
+
+For requests with a JSON body, use the header:
+
+```text
+Content-Type: application/json
+```
 
 ---
 
@@ -84,7 +144,6 @@ The fix is to perform the matching inside MongoDB using a case-insensitive regul
 
 ```js
 const { name } = req.query;
-
 const student = await Student.find({
   name: { $regex: name.trim(), $options: "i" }
 });
@@ -121,9 +180,9 @@ If the admin instead sends the ID inside the JSON body while leaving it out of t
 
 `findByIdAndUpdate()` could then:
 
-* Update the wrong document
-* Find no document
-* Throw a cast error
+- Update the wrong document
+- Find no document
+- Throw a cast error
 
 Any of these situations could make the response appear as though "nothing changed," giving the impression that the old document is still there.
 
@@ -169,7 +228,6 @@ The current code is:
 
 ```js
 const student = await Student.findById(id);
-
 return res.status(200).json({
   message: "Student fetched successfully",
   student
@@ -331,16 +389,16 @@ The search endpoint was tested using `q=ada`.
 
 The database contained students named:
 
-* Ada
-* ADA
+- Ada
+- ADA
 
 The search is expected to be case-insensitive and return both students.
 
 ### Expected Result
 
-* Status: **200 OK**
-* Response: Array
-* Array contains both `Ada` and `ADA`
+- Status: **200 OK**
+- Response: Array
+- Array contains both `Ada` and `ADA`
 
 ### Result
 
@@ -368,8 +426,8 @@ The API should not return the entire student database when no search text is pro
 
 ### Expected Result
 
-* Status: **400 Bad Request**
-* Clear error message
+- Status: **400 Bad Request**
+- Clear error message
 
 ### Result
 
@@ -399,8 +457,8 @@ The updated implementation checks whether the ID is valid before calling `findBy
 
 ### Expected Result
 
-* Status: **400 Bad Request**
-* Not 500
+- Status: **400 Bad Request**
+- Not 500
 
 ### Result
 
@@ -426,8 +484,8 @@ A valid-looking MongoDB ObjectId was supplied, but no student with that ID exist
 
 ### Expected Result
 
-* Status: **404 Not Found**
-* Student should not be returned as `null` with a 200 response
+- Status: **404 Not Found**
+- Student should not be returned as `null` with a 200 response
 
 ### Result
 
@@ -463,9 +521,9 @@ The response should contain the updated student rather than the old version.
 
 ### Expected Result
 
-* Status: **200 OK**
-* Response contains the student
-* The `course` field shows the new course
+- Status: **200 OK**
+- Response contains the student
+- The `course` field shows the new course
 
 ### Result
 
@@ -517,9 +575,9 @@ so that schema validation is applied during the update.
 
 ### Expected Result
 
-* Status: **400 Bad Request**
-* Validation error
-* Not 500
+- Status: **400 Bad Request**
+- Validation error
+- Not 500
 
 ### Result
 
@@ -573,8 +631,8 @@ The API handles this error and converts it to a `409 Conflict` response.
 
 ### Expected Result
 
-* First request: **200 OK**
-* Second request: **409 Conflict**
+- First request: **200 OK**
+- Second request: **409 Conflict**
 
 ### Result
 
@@ -600,12 +658,12 @@ A valid MongoDB ObjectId belonging to no student in the database was supplied.
 
 The API should distinguish between:
 
-* Successfully deleting an existing student
-* Attempting to delete a student that does not exist
+- Successfully deleting an existing student
+- Attempting to delete a student that does not exist
 
 ### Expected Result
 
-* Status: **404 Not Found**
+- Status: **404 Not Found**
 
 ### Result
 
@@ -617,35 +675,35 @@ The test passed. The API correctly returned **404 Not Found** instead of reporti
 
 ---
 
-# Test Summary
+## Test Summary
 
-| # | Test                               | Expected                  | Result   |
-| - | ---------------------------------- | ------------------------- | -------- |
-| 1 | Search `q=ada`                     | 200, finds Ada and ADA    | ✅ Passed |
-| 2 | Search without `q`                 | 400                       | ✅ Passed |
-| 3 | Invalid ID `abc123`                | 400                       | ✅ Passed |
-| 4 | Valid ID but student doesn't exist | 404                       | ✅ Passed |
-| 5 | PATCH course                       | 200, updated course shown | ✅ Passed |
-| 6 | PATCH course `"A"`                 | 400 validation error      | ✅ Passed |
-| 7 | Duplicate email                    | Second request 409        | ✅ Passed |
-| 8 | Delete nonexistent student         | 404                       | ✅ Passed |
+| # | Test | Expected | Result |
+|---|------|----------|--------|
+| 1 | Search `q=ada` | 200, finds Ada and ADA | ✅ Passed |
+| 2 | Search without `q` | 400 | ✅ Passed |
+| 3 | Invalid ID `abc123` | 400 | ✅ Passed |
+| 4 | Valid ID but student doesn't exist | 404 | ✅ Passed |
+| 5 | PATCH course | 200, updated course shown | ✅ Passed |
+| 6 | PATCH course `"A"` | 400 validation error | ✅ Passed |
+| 7 | Duplicate email | Second request 409 | ✅ Passed |
+| 8 | Delete nonexistent student | 404 | ✅ Passed |
 
 ---
 
-# Conclusion
+## Conclusion
 
 The API was tested against all eight required scenarios from the **"Ghost Student"** challenge.
 
 The updated implementation correctly handles:
 
-* Case-insensitive database searching
-* Missing search queries
-* Invalid MongoDB ObjectIds
-* Students that do not exist
-* Partial course updates
-* Mongoose update validation
-* Duplicate email addresses
-* Missing required student information
-* Honest delete responses
+- Case-insensitive database searching
+- Missing search queries
+- Invalid MongoDB ObjectIds
+- Students that do not exist
+- Partial course updates
+- Mongoose update validation
+- Duplicate email addresses
+- Missing required student information
+- Honest delete responses
 
 All required Part C tests passed successfully.
