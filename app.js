@@ -14,6 +14,8 @@ dotenv.config();
 app.use(morgan('dev'));
 app.use(express.json());
 
+// const dns = require('dns');
+// dns.setServers(['8.8.8.8', '8.8.4.4']);
 
 
 databaseConnection();
